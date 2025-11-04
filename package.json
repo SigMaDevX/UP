@@ -1,0 +1,18 @@
+{
+  "name": "jawad-db-api",
+  "version": "1.0.0",
+  "description": "Permanent QuickDB API for WhatsApp Bot (Render, No Disks)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["quickdb", "sqlite", "api", "whatsapp", "bot", "render"],
+  "author": "Jawad",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "quick.db": "^9.1.7"
+  }
+}
