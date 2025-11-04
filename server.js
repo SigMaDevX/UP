@@ -10,17 +10,22 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = 'jawadxBot804';
 
-// === RENDER ROOT FIX ===
-const ROOT = process.env.RENDER ? '/app' : __dirname;
-const DB_PATH = path.join(ROOT, 'data', 'database.sqlite');
-const BACKUP_PATH = path.join(ROOT, 'uploads', 'backup.json');
+// === FIXED: Use RELATIVE paths (Render allows ./data, not /app/data) ===
+const DATA_DIR = './data';
+const UPLOADS_DIR = './uploads';
+const DB_PATH = path.join(DATA_DIR, 'database.sqlite');
+const BACKUP_PATH = path.join(UPLOADS_DIR, 'backup.json');
 
-// Ensure directories
-['data', 'uploads'].forEach(dir => {
-  const dirPath = path.join(ROOT, dir);
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-    console.log(`Created directory: ${dirPath}`);
+// === Create directories SAFELY ===
+[DATA_DIR, UPLOADS_DIR].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`Created directory: ${dir}`);
+    } catch (err) {
+      if (err.code !== 'EACCES') throw err;
+      console.warn(`Could not create ${dir} (permission denied). Will try to use if exists.`);
+    }
   }
 });
 
@@ -32,27 +37,30 @@ app.use(express.urlencoded({ extended: true }));
 // Initialize DB
 let db;
 (async () => {
-  db = await dbLib.init(DB_PATH);
-  console.log('Database loaded:', DB_PATH);
+  try {
+    db = await dbLib.init(DB_PATH);
+    console.log('Database loaded:', DB_PATH);
 
-  // Auto-restore from backup if DB missing
-  if (!fs.existsSync(DB_PATH) && fs.existsSync(BACKUP_PATH)) {
-    console.log('Database missing. Restoring from backup...');
-    await dbLib.restoreFromBackup(BACKUP_PATH, db);
-    console.log('Restored from backup.json');
+    // Auto-restore from backup if DB missing
+    if (!fs.existsSync(DB_PATH) && fs.existsSync(BACKUP_PATH)) {
+      console.log('Database missing. Restoring from backup...');
+      await dbLib.restoreFromBackup(BACKUP_PATH, db);
+      console.log('Restored from backup.json');
+    }
+
+    // Auto-backup every 30 mins
+    setInterval(() => {
+      dbLib.createBackup(BACKUP_PATH, db);
+    }, 30 * 60 * 1000);
+    console.log('Auto-backup scheduled every 30 mins');
+  } catch (err) {
+    console.error('DB init failed:', err);
   }
-
-  // Auto-backup every 30 mins
-  setInterval(() => {
-    dbLib.createBackup(BACKUP_PATH, db);
-  }, 30 * 60 * 1000);
-  console.log('Auto-backup scheduled every 30 mins');
 })();
 
-// === AUTH MIDDLEWARE ===
+// === AUTH ===
 const requireAuth = (req, res, next) => {
-  const auth = req.headers.authorization;
-  if (auth === API_KEY) {
+  if (req.headers.authorization === API_KEY) {
     next();
   } else {
     res.status(403).json({ success: false, error: 'Unauthorized' });
@@ -60,13 +68,10 @@ const requireAuth = (req, res, next) => {
 };
 
 // === ROUTES ===
-
-// Public
 app.get('/status', (req, res) => {
   res.json({ status: 'running' });
 });
 
-// Save
 app.post('/set', requireAuth, async (req, res) => {
   const { key, value } = req.body;
   if (!key || value === undefined) {
@@ -77,7 +82,6 @@ app.post('/set', requireAuth, async (req, res) => {
   res.json({ success: true, key, value });
 });
 
-// Get
 app.get('/get/:key', requireAuth, async (req, res) => {
   const { key } = req.params;
   const value = await db.get(key);
@@ -87,7 +91,6 @@ app.get('/get/:key', requireAuth, async (req, res) => {
   res.json({ success: true, key, value });
 });
 
-// Delete
 app.delete('/delete/:key', requireAuth, async (req, res) => {
   const { key } = req.params;
   const exists = await db.has(key);
@@ -99,14 +102,12 @@ app.delete('/delete/:key', requireAuth, async (req, res) => {
   res.json({ success: true, key });
 });
 
-// Export all
 app.get('/export', requireAuth, async (req, res) => {
   const all = await db.all();
   const data = Object.fromEntries(all.map(i => [i.id, i.data]));
   res.json({ success: true, data, count: all.length });
 });
 
-// Import (merge or replace)
 app.post('/import', requireAuth, async (req, res) => {
   const { data, replace } = req.body;
   if (!data || typeof data !== 'object') {
@@ -122,7 +123,6 @@ app.post('/import', requireAuth, async (req, res) => {
   res.json({ success: true, imported: count, mode: replace ? 'replace' : 'merge' });
 });
 
-// Download raw DB
 app.get('/dbfile', requireAuth, (req, res) => {
   if (!fs.existsSync(DB_PATH)) {
     return res.status(404).json({ success: false, error: 'Database file not found' });
